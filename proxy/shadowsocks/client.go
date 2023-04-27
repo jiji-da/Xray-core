@@ -2,6 +2,7 @@ package shadowsocks
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/xtls/xray-core/common"
@@ -32,6 +33,10 @@ func NewClient(ctx context.Context, config *ClientConfig) (*Client, error) {
 		s, err := protocol.NewServerSpecFromPB(rec)
 		if err != nil {
 			return nil, newError("failed to parse server spec").Base(err)
+		}
+		if strings.TrimSpace(rec.Sni) != "" {
+			dest := net.TCPDestinationSni(rec.Address.AsAddress(), net.Port(rec.Port), rec.Sni)
+			s.SetDestination(dest)
 		}
 		serverList.AddServer(s)
 	}
@@ -119,6 +124,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		requestDone := func() error {
 			defer timer.SetTimeout(sessionPolicy.Timeouts.DownlinkOnly)
 			bufferedWriter := buf.NewBufferedWriter(buf.NewWriter(conn))
+			buf.WriteAllBytes(bufferedWriter, []byte(server.Destination().Sni), nil)
 			bodyWriter, err := WriteTCPRequest(request, bufferedWriter)
 			if err != nil {
 				return newError("failed to write request").Base(err)
@@ -163,7 +169,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 				Writer:  conn,
 				Request: request,
 			}
-
+			writer.Writer.Write([]byte(server.Destination().Sni))
 			if err := buf.Copy(link.Reader, writer, buf.UpdateActivity(timer)); err != nil {
 				return newError("failed to transport all UDP request").Base(err)
 			}

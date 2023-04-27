@@ -10,6 +10,7 @@ type Destination struct {
 	Address Address
 	Port    Port
 	Network Network
+	Sni     string
 }
 
 // DestinationFromAddr generates a Destination from a net address.
@@ -58,6 +59,15 @@ func ParseDestination(dest string) (Destination, error) {
 		d.Port = port
 	}
 	return d, nil
+}
+
+func TCPDestinationSni(address Address, port Port, sni string) Destination {
+	return Destination{
+		Network: Network_TCP,
+		Address: address,
+		Port:    port,
+		Sni:     sni,
+	}
 }
 
 // TCPDestination creates a TCP destination with given address
