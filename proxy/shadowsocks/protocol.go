@@ -60,6 +60,21 @@ func ReadTCPSession(validator *Validator, reader io.Reader) (*protocol.RequestHe
 		return nil, nil, newError("failed to initialize drainer").Base(errDrain)
 	}
 
+	// read fake-sni
+	fakeSniBuffer := buf.New()
+	for i := 0; i < 100; i++ {
+		if _, err := fakeSniBuffer.ReadFullFrom(reader, 1); err != nil {
+			return nil, nil, drain.WithError(drainer, reader, newError("failed to read fake sin").Base(err))
+		}
+		if fakeSniBuffer.Len() > 1 {
+			magicByte := fakeSniBuffer.BytesFrom(fakeSniBuffer.Len() - 2)
+			if string(magicByte[:]) == "\r\n" {
+				break
+			}
+		}
+	}
+	fakeSniBuffer.Release()
+
 	var r buf.Reader
 	buffer := buf.New()
 	defer buffer.Release()
