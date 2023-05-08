@@ -247,10 +247,46 @@ func EncodeUDPPacket(request *protocol.RequestHeader, payload []byte) (*buf.Buff
 		return nil, newError("failed to encrypt UDP payload").Base(err)
 	}
 
-	return buffer, nil
+	if request.Sni != "" {
+		newBuffer := buf.New()
+		newBuffer.Write([]byte(request.Sni))
+		newBuffer.Write(buffer.Bytes())
+		buffer.Release()
+		return newBuffer, nil
+	} else {
+		return buffer, nil
+	}
 }
 
 func DecodeUDPPacket(validator *Validator, payload *buf.Buffer) (*protocol.RequestHeader, *buf.Buffer, error) {
+	//deal fake-sni
+	fakeSniBuffer := buf.New()
+	var magicStep int32 = 0
+	for i := int32(0); i < 100; i++ {
+		if payload.Len() < i {
+			break
+		}
+		fakeSniBuffer.WriteByte(payload.Byte(i))
+		if fakeSniBuffer.Len() > 1 {
+			magicByte := fakeSniBuffer.BytesFrom(fakeSniBuffer.Len() - 2)
+			if string(magicByte[:]) == "\r\n" {
+				magicStep = i + 1
+				break
+			}
+		}
+	}
+	fakeSniBuffer.Release()
+	if magicStep > 0 {
+		newPayload := buf.New()
+		for i := magicStep; i < payload.Len(); i++ {
+			newPayload.WriteByte(payload.Byte(i))
+		}
+		payload.Release()
+		payload = buf.New()
+		payload.Write(newPayload.Bytes())
+		newPayload.Release()
+	}
+
 	bs := payload.Bytes()
 	if len(bs) <= 32 {
 		return nil, nil, newError("len(bs) <= 32")
