@@ -87,6 +87,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 		Version: Version,
 		Address: destination.Address,
 		Port:    destination.Port,
+		Sni:     server.Destination().Sni,
 	}
 	if destination.Network == net.Network_TCP {
 		request.Command = protocol.RequestCommandTCP
@@ -169,7 +170,6 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 				Writer:  conn,
 				Request: request,
 			}
-			writer.Writer.Write([]byte(server.Destination().Sni))
 			if err := buf.Copy(link.Reader, writer, buf.UpdateActivity(timer)); err != nil {
 				return newError("failed to transport all UDP request").Base(err)
 			}

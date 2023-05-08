@@ -51,6 +51,7 @@ type RequestHeader struct {
 	Port     net.Port
 	Address  net.Address
 	User     *MemoryUser
+	Sni      string
 }
 
 func (h *RequestHeader) Destination() net.Destination {
