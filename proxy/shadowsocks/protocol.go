@@ -376,6 +376,7 @@ func (w *UDPWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 				User:    w.Request.User,
 				Address: b.UDP.Address,
 				Port:    b.UDP.Port,
+				Sni:     w.Request.Sni,
 			}
 		}
 		packet, err := EncodeUDPPacket(request, b.Bytes())
