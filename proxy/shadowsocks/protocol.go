@@ -63,7 +63,7 @@ func ReadTCPSession(validator *Validator, reader io.Reader) (*protocol.RequestHe
 
 	// read fake-sni
 	fakeSniBuffer := buf.New()
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 50; i++ {
 		if _, err := fakeSniBuffer.ReadFullFrom(reader, 1); err != nil {
 			return nil, nil, drain.WithError(drainer, reader, newError("failed to read fake sin").Base(err))
 		}
