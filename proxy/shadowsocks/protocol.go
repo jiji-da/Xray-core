@@ -1,6 +1,7 @@
 package shadowsocks
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -260,31 +261,12 @@ func EncodeUDPPacket(request *protocol.RequestHeader, payload []byte) (*buf.Buff
 
 func DecodeUDPPacket(validator *Validator, payload *buf.Buffer) (*protocol.RequestHeader, *buf.Buffer, error) {
 	//deal fake-sni
-	fakeSniBuffer := buf.New()
-	var magicStep int32 = 0
-	for i := int32(0); i < 100; i++ {
-		if payload.Len() < i {
-			break
-		}
-		fakeSniBuffer.WriteByte(payload.Byte(i))
-		if fakeSniBuffer.Len() > 1 {
-			magicByte := fakeSniBuffer.BytesFrom(fakeSniBuffer.Len() - 2)
-			if string(magicByte[:]) == "\r\n" {
-				magicStep = i + 1
-				break
-			}
-		}
-	}
-	fakeSniBuffer.Release()
-	if magicStep > 0 {
-		newPayload := buf.New()
-		for i := magicStep; i < payload.Len(); i++ {
-			newPayload.WriteByte(payload.Byte(i))
-		}
+	obs := payload.Bytes()
+	if bytes.HasPrefix(obs, []byte{70, 97, 107, 101, 45, 83, 110, 105, 58}) {
+		_, nbs, _ := bytes.Cut(obs, []byte{13, 10})
 		payload.Release()
 		payload = buf.New()
-		payload.Write(newPayload.Bytes())
-		newPayload.Release()
+		payload.Write(nbs)
 	}
 
 	bs := payload.Bytes()
