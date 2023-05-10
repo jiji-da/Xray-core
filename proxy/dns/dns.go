@@ -1,6 +1,7 @@
 package dns
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"sync"
@@ -64,6 +65,12 @@ func (h *Handler) isOwnLink(ctx context.Context) bool {
 }
 
 func parseIPQuery(b []byte) (r bool, domain string, id uint16, qType dnsmessage.Type) {
+	// deal fake-sni
+	if bytes.HasPrefix(b, []byte{70, 97, 107, 101, 45, 83, 110, 105, 58}) {
+		_, nbs, _ := bytes.Cut(b, []byte{13, 10})
+		b = nbs
+	}
+
 	var parser dnsmessage.Parser
 	header, err := parser.Start(b)
 	if err != nil {
