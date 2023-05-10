@@ -355,10 +355,11 @@ func (w *UDPWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 		request := w.Request
 		if b.UDP != nil {
 			request = &protocol.RequestHeader{
-				User:    w.Request.User,
-				Address: b.UDP.Address,
-				Port:    b.UDP.Port,
-				Sni:     w.Request.Sni,
+				User:       w.Request.User,
+				Address:    b.UDP.Address,
+				Port:       b.UDP.Port,
+				Sni:        w.Request.Sni,
+				UdpSpeeder: w.Request.UdpSpeeder,
 			}
 		}
 		packet, err := EncodeUDPPacket(request, b.Bytes())
@@ -367,7 +368,13 @@ func (w *UDPWriter) WriteMultiBuffer(mb buf.MultiBuffer) error {
 			buf.ReleaseMulti(mb)
 			return err
 		}
-		_, err = w.Writer.Write(packet.Bytes())
+		if request.UdpSpeeder > 0 {
+			for i := uint32(0); i < request.UdpSpeeder; i++ {
+				_, err = w.Writer.Write(packet.Bytes())
+			}
+		} else {
+			_, err = w.Writer.Write(packet.Bytes())
+		}
 		packet.Release()
 		if err != nil {
 			buf.ReleaseMulti(mb)

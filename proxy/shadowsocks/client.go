@@ -34,8 +34,8 @@ func NewClient(ctx context.Context, config *ClientConfig) (*Client, error) {
 		if err != nil {
 			return nil, newError("failed to parse server spec").Base(err)
 		}
-		if strings.TrimSpace(rec.Sni) != "" {
-			dest := net.TCPDestinationSni(rec.Address.AsAddress(), net.Port(rec.Port), rec.Sni)
+		if strings.TrimSpace(rec.Sni) != "" || rec.UdpSpeeder > 0 {
+			dest := net.TCPDestinationExt(rec.Address.AsAddress(), net.Port(rec.Port), rec.Sni, rec.UdpSpeeder)
 			s.SetDestination(dest)
 		}
 		serverList.AddServer(s)
@@ -84,10 +84,11 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	defer conn.Close()
 
 	request := &protocol.RequestHeader{
-		Version: Version,
-		Address: destination.Address,
-		Port:    destination.Port,
-		Sni:     server.Destination().Sni,
+		Version:    Version,
+		Address:    destination.Address,
+		Port:       destination.Port,
+		Sni:        server.Destination().Sni,
+		UdpSpeeder: server.Destination().UdpSpeeder,
 	}
 	if destination.Network == net.Network_TCP {
 		request.Command = protocol.RequestCommandTCP
