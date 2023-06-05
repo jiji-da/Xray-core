@@ -5,6 +5,7 @@ package dispatcher
 import (
 	"context"
 	"fmt"
+	"golang.org/x/time/rate"
 	"strings"
 	"sync"
 	"time"
@@ -228,18 +229,56 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network, sn
 		if p.Stats.UserUplink {
 			name := "user>>>" + user.Email + ">>>traffic>>>uplink"
 			if c, _ := stats.GetOrRegisterCounter(d.stats, name); c != nil {
-				inboundLink.Writer = &SizeStatWriter{
-					Counter: c,
-					Writer:  inboundLink.Writer,
+				if user.Rate == 0 {
+					inboundLink.Writer = &SizeStatWriter{
+						Counter: c,
+						Writer:  inboundLink.Writer,
+					}
+				} else {
+					name = "user>>>" + user.Email + ">>>traffic>>>ratelimiter"
+					if limiter, _ := stats.GetOrRegisterRateLimiter(d.stats, name, user.Rate); limiter != nil {
+						limiter.SetLimit(rate.Limit(user.Rate))
+						inboundLink.Writer = &RateLimitedWriter{
+							Limiter: limiter,
+							Writer: &SizeStatWriter{
+								Counter: c,
+								Writer:  inboundLink.Writer,
+							},
+						}
+					} else {
+						inboundLink.Writer = &SizeStatWriter{
+							Counter: c,
+							Writer:  inboundLink.Writer,
+						}
+					}
 				}
 			}
 		}
 		if p.Stats.UserDownlink {
 			name := "user>>>" + user.Email + ">>>traffic>>>downlink"
 			if c, _ := stats.GetOrRegisterCounter(d.stats, name); c != nil {
-				outboundLink.Writer = &SizeStatWriter{
-					Counter: c,
-					Writer:  outboundLink.Writer,
+				if user.Rate == 0 {
+					outboundLink.Writer = &SizeStatWriter{
+						Counter: c,
+						Writer:  outboundLink.Writer,
+					}
+				} else {
+					name = "user>>>" + user.Email + ">>>traffic>>>ratelimiter"
+					if limiter, _ := stats.GetOrRegisterRateLimiter(d.stats, name, user.Rate); limiter != nil {
+						limiter.SetLimit(rate.Limit(user.Rate))
+						outboundLink.Writer = &RateLimitedWriter{
+							Limiter: limiter,
+							Writer: &SizeStatWriter{
+								Counter: c,
+								Writer:  outboundLink.Writer,
+							},
+						}
+					} else {
+						outboundLink.Writer = &SizeStatWriter{
+							Counter: c,
+							Writer:  outboundLink.Writer,
+						}
+					}
 				}
 			}
 		}

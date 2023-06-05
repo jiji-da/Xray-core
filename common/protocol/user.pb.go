@@ -29,6 +29,7 @@ type User struct {
 
 	Level uint32 `protobuf:"varint,1,opt,name=level,proto3" json:"level,omitempty"`
 	Email string `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	Rate  uint32 `protobuf:"varint,4,opt,name=rate,proto3" json:"rate,omitempty"`
 	// Protocol specific account information. Must be the account proto in one of
 	// the proxies.
 	Account *serial.TypedMessage `protobuf:"bytes,3,opt,name=account,proto3" json:"account,omitempty"`
@@ -87,6 +88,12 @@ func (x *User) GetAccount() *serial.TypedMessage {
 	return nil
 }
 
+func (x *User) GetRate() uint32 {
+	if x != nil {
+		return x.Rate
+	}
+	return 0
+}
 var File_common_protocol_user_proto protoreflect.FileDescriptor
 
 var file_common_protocol_user_proto_rawDesc = []byte{

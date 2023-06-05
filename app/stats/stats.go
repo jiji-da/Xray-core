@@ -4,6 +4,7 @@ package stats
 
 import (
 	"context"
+	"golang.org/x/time/rate"
 	"sync"
 
 	"github.com/xtls/xray-core/common"
@@ -15,6 +16,7 @@ import (
 type Manager struct {
 	access   sync.RWMutex
 	counters map[string]*Counter
+	limiters map[string]*rate.Limiter
 	channels map[string]*Channel
 	running  bool
 }
@@ -23,6 +25,7 @@ type Manager struct {
 func NewManager(ctx context.Context, config *Config) (*Manager, error) {
 	m := &Manager{
 		counters: make(map[string]*Counter),
+		limiters: make(map[string]*rate.Limiter),
 		channels: make(map[string]*Channel),
 	}
 
@@ -66,6 +69,27 @@ func (m *Manager) GetCounter(name string) stats.Counter {
 	defer m.access.RUnlock()
 
 	if c, found := m.counters[name]; found {
+		return c
+	}
+	return nil
+}
+func (m *Manager) RegisterRateLimiter(name string, rateLimit int) (*rate.Limiter, error) {
+	m.access.Lock()
+	defer m.access.Unlock()
+
+	if _, found := m.limiters[name]; found {
+		return nil, newError("Limiter ", name, " already registered.")
+	}
+	newError("create new Limiter ", name).AtDebug().WriteToLog()
+	c := rate.NewLimiter(rate.Limit(rateLimit), rateLimit)
+	m.limiters[name] = c
+	return c, nil
+}
+func (m *Manager) GetRateLimiter(name string) *rate.Limiter {
+	m.access.RLock()
+	defer m.access.RUnlock()
+
+	if c, found := m.limiters[name]; found {
 		return c
 	}
 	return nil
