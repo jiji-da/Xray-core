@@ -61,21 +61,6 @@ func ReadTCPSession(validator *Validator, reader io.Reader) (*protocol.RequestHe
 		return nil, nil, newError("failed to initialize drainer").Base(errDrain)
 	}
 
-	// read fake-sni
-	fakeSniBuffer := buf.New()
-	for i := 0; i < 50; i++ {
-		if _, err := fakeSniBuffer.ReadFullFrom(reader, 1); err != nil {
-			return nil, nil, drain.WithError(drainer, reader, newError("failed to read fake sin").Base(err))
-		}
-		if fakeSniBuffer.Len() > 1 {
-			magicByte := fakeSniBuffer.BytesFrom(fakeSniBuffer.Len() - 2)
-			if string(magicByte[:]) == "\r\n" {
-				break
-			}
-		}
-	}
-	fakeSniBuffer.Release()
-
 	var r buf.Reader
 	buffer := buf.New()
 	defer buffer.Release()
@@ -83,6 +68,20 @@ func ReadTCPSession(validator *Validator, reader io.Reader) (*protocol.RequestHe
 	if _, err := buffer.ReadFullFrom(reader, 50); err != nil {
 		drainer.AcknowledgeReceive(int(buffer.Len()))
 		return nil, nil, drain.WithError(drainer, reader, newError("failed to read 50 bytes").Base(err))
+	}
+
+	// deal fake-sni
+	obs := buffer.Bytes()
+	if bytes.HasPrefix(obs, []byte{70, 97, 107, 101, 45, 83, 110, 105, 58}) {
+		fbs, nbs, _ := bytes.Cut(obs, []byte{13, 10})
+		buffer.Release()
+		buffer = buf.New()
+		buffer.Write(nbs)
+		nm := 50 - len(fbs) - 2
+		if _, err := buffer.ReadFullFrom(reader, int32(nm)); err != nil {
+			drainer.AcknowledgeReceive(int(buffer.Len()))
+			return nil, nil, drain.WithError(drainer, reader, newError("failed to read 50 bytes").Base(err))
+		}
 	}
 
 	bs := buffer.Bytes()
