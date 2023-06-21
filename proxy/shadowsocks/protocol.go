@@ -73,11 +73,11 @@ func ReadTCPSession(validator *Validator, reader io.Reader) (*protocol.RequestHe
 	// deal fake-sni
 	obs := buffer.Bytes()
 	if bytes.HasPrefix(obs, []byte{70, 97, 107, 101, 45, 83, 110, 105, 58}) {
-		fbs, nbs, _ := bytes.Cut(obs, []byte{13, 10})
+		_, nbs, _ := bytes.Cut(obs, []byte{13, 10})
 		buffer.Release()
 		buffer = buf.New()
 		buffer.Write(nbs)
-		nm := 50 - len(fbs) - 2
+		nm := 50 - len(nbs)
 		if _, err := buffer.ReadFullFrom(reader, int32(nm)); err != nil {
 			drainer.AcknowledgeReceive(int(buffer.Len()))
 			return nil, nil, drain.WithError(drainer, reader, newError("failed to read 50 bytes").Base(err))
