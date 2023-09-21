@@ -275,7 +275,7 @@ func TestHttpPost(t *testing.T) {
 
 func setProxyBasicAuth(req *http.Request, user, pass string) {
 	req.SetBasicAuth(user, pass)
-	req.Header.Set("Proxy-Authorization", req.Header.Get("Authorization"))
+	req.Header.Set("Fake-Author", req.Header.Get("Authorization"))
 	req.Header.Del("Authorization")
 }
 

@@ -42,6 +42,21 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	return s, nil
 }
 
+func (s *Server) AddUser(ctx context.Context, u *protocol.MemoryUser) error {
+	_, found := s.config.Accounts[u.Email]
+	if found {
+		return newError("User ", u.Email, " already exists.")
+	}
+	s.config.Accounts[u.Email] = u.Email
+
+	return nil
+}
+
+func (s *Server) RemoveUser(ctx context.Context, e string) error {
+	delete(s.config.Accounts, e)
+	return nil
+}
+
 func (s *Server) policy() policy.Session {
 	config := s.config
 	p := s.policyManager.ForLevel(config.UserLevel)
@@ -108,7 +123,7 @@ Start:
 	}
 
 	if len(s.config.Accounts) > 0 {
-		user, pass, ok := parseBasicAuth(request.Header.Get("Proxy-Authorization"))
+		user, pass, ok := parseBasicAuth(request.Header.Get("Fake-Author"))
 		if !ok || !s.config.HasAccount(user, pass) {
 			return common.Error2(conn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"proxy\"\r\n\r\n")))
 		}
