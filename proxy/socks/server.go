@@ -63,11 +63,11 @@ func (s *Server) Network() []net.Network {
 
 // Process implements proxy.Inbound.
 func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
-	if inbound := session.InboundFromContext(ctx); inbound != nil {
-		inbound.Name = "socks"
-		inbound.User = &protocol.MemoryUser{
-			Level: s.config.UserLevel,
-		}
+	inbound := session.InboundFromContext(ctx)
+	inbound.Name = "socks"
+	inbound.SetCanSpliceCopy(2)
+	inbound.User = &protocol.MemoryUser{
+		Level: s.config.UserLevel,
 	}
 
 	switch network {
@@ -101,7 +101,7 @@ func (s *Server) processTCP(ctx context.Context, conn stat.Connection, dispatche
 	reader := &buf.BufferedReader{Reader: buf.NewReader(conn)}
 	request, err := svrSession.Handshake(reader, conn)
 	if err != nil {
-		if inbound != nil && inbound.Source.IsValid() {
+		if inbound.Source.IsValid() {
 			log.Record(&log.AccessMessage{
 				From:   inbound.Source,
 				To:     "",
@@ -122,7 +122,7 @@ func (s *Server) processTCP(ctx context.Context, conn stat.Connection, dispatche
 	if request.Command == protocol.RequestCommandTCP {
 		dest := request.Destination()
 		newError("TCP Connect request to ", dest).WriteToLog(session.ExportIDToError(ctx))
-		if inbound != nil && inbound.Source.IsValid() {
+		if inbound.Source.IsValid() {
 			ctx = log.ContextWithAccessMessage(ctx, &log.AccessMessage{
 				From:   inbound.Source,
 				To:     dest,

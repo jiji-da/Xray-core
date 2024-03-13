@@ -6,10 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/xtls/xray-core/app/router"
 	"github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/serial"
 	"github.com/xtls/xray-core/common/platform/filesystem"
+	"google.golang.org/protobuf/proto"
 )
 
 type RouterRulesConfig struct {
@@ -24,11 +25,13 @@ type StrategyConfig struct {
 }
 
 type BalancingRule struct {
-	Tag       string         `json:"tag"`
-	Selectors StringList     `json:"selector"`
-	Strategy  StrategyConfig `json:"strategy"`
+	Tag         string         `json:"tag"`
+	Selectors   StringList     `json:"selector"`
+	Strategy    StrategyConfig `json:"strategy"`
+	FallbackTag string         `json:"fallbackTag"`
 }
 
+// Build builds the balancing rule
 func (r *BalancingRule) Build() (*router.BalancingRule, error) {
 	if r.Tag == "" {
 		return nil, newError("empty balancer tag")
@@ -37,20 +40,37 @@ func (r *BalancingRule) Build() (*router.BalancingRule, error) {
 		return nil, newError("empty selector list")
 	}
 
-	var strategy string
-	switch strings.ToLower(r.Strategy.Type) {
-	case strategyRandom, "":
-		strategy = strategyRandom
-	case strategyLeastPing:
-		strategy = "leastPing"
+	r.Strategy.Type = strings.ToLower(r.Strategy.Type)
+	switch r.Strategy.Type {
+	case "":
+		r.Strategy.Type = strategyRandom
+	case strategyRandom, strategyLeastLoad, strategyLeastPing, strategyRoundRobin:
 	default:
 		return nil, newError("unknown balancing strategy: " + r.Strategy.Type)
 	}
 
+	settings := []byte("{}")
+	if r.Strategy.Settings != nil {
+		settings = ([]byte)(*r.Strategy.Settings)
+	}
+	rawConfig, err := strategyConfigLoader.LoadWithID(settings, r.Strategy.Type)
+	if err != nil {
+		return nil, newError("failed to parse to strategy config.").Base(err)
+	}
+	var ts proto.Message
+	if builder, ok := rawConfig.(Buildable); ok {
+		ts, err = builder.Build()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &router.BalancingRule{
+		Strategy:         r.Strategy.Type,
+		StrategySettings: serial.ToTypedMessage(ts),
+		FallbackTag:      r.FallbackTag,
+		OutboundSelector: r.Selectors,
 		Tag:              r.Tag,
-		OutboundSelector: []string(r.Selectors),
-		Strategy:         strategy,
 	}, nil
 }
 
@@ -245,6 +265,23 @@ func loadSite(file, code string) ([]*router.Domain, error) {
 	return SiteCache[index].Domain, nil
 }
 
+func DecodeVarint(buf []byte) (x uint64, n int) {
+	for shift := uint(0); shift < 64; shift += 7 {
+		if n >= len(buf) {
+			return 0, 0
+		}
+		b := uint64(buf[n])
+		n++
+		x |= (b & 0x7F) << shift
+		if (b & 0x80) == 0 {
+			return x, n
+		}
+	}
+
+	// The number is too large to represent in a 64-bit value.
+	return 0, 0
+}
+
 func find(data, code []byte) []byte {
 	codeL := len(code)
 	if codeL == 0 {
@@ -255,7 +292,7 @@ func find(data, code []byte) []byte {
 		if dataL < 2 {
 			return nil
 		}
-		x, y := proto.DecodeVarint(data[1:])
+		x, y := DecodeVarint(data[1:])
 		if x == 0 && y == 0 {
 			return nil
 		}
@@ -504,17 +541,17 @@ func ToCidrList(ips StringList) ([]*router.GeoIP, error) {
 func parseFieldRule(msg json.RawMessage) (*router.RoutingRule, error) {
 	type RawFieldRule struct {
 		RouterRule
-		Domain     *StringList  `json:"domain"`
-		Domains    *StringList  `json:"domains"`
-		IP         *StringList  `json:"ip"`
-		Port       *PortList    `json:"port"`
-		Network    *NetworkList `json:"network"`
-		SourceIP   *StringList  `json:"source"`
-		SourcePort *PortList    `json:"sourcePort"`
-		User       *StringList  `json:"user"`
-		InboundTag *StringList  `json:"inboundTag"`
-		Protocols  *StringList  `json:"protocol"`
-		Attributes string       `json:"attrs"`
+		Domain     *StringList       `json:"domain"`
+		Domains    *StringList       `json:"domains"`
+		IP         *StringList       `json:"ip"`
+		Port       *PortList         `json:"port"`
+		Network    *NetworkList      `json:"network"`
+		SourceIP   *StringList       `json:"source"`
+		SourcePort *PortList         `json:"sourcePort"`
+		User       *StringList       `json:"user"`
+		InboundTag *StringList       `json:"inboundTag"`
+		Protocols  *StringList       `json:"protocol"`
+		Attributes map[string]string `json:"attrs"`
 	}
 	rawFieldRule := new(RawFieldRule)
 	err := json.Unmarshal(msg, rawFieldRule)
@@ -619,7 +656,7 @@ func ParseRule(msg json.RawMessage) (*router.RoutingRule, error) {
 	if err != nil {
 		return nil, newError("invalid router rule").Base(err)
 	}
-	if strings.EqualFold(rawRule.Type, "field") {
+	if rawRule.Type == "" || strings.EqualFold(rawRule.Type, "field") {
 		fieldrule, err := parseFieldRule(msg)
 		if err != nil {
 			return nil, newError("invalid field rule").Base(err)

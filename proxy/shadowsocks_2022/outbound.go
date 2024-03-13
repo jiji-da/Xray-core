@@ -2,8 +2,6 @@ package shadowsocks_2022
 
 import (
 	"context"
-	"io"
-	"runtime"
 	"time"
 
 	shadowsocks "github.com/sagernet/sing-shadowsocks"
@@ -17,6 +15,7 @@ import (
 	"github.com/xtls/xray-core/common/buf"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/session"
+	"github.com/xtls/xray-core/common/singbridge"
 	"github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet"
 )
@@ -66,12 +65,14 @@ func (o *Outbound) Process(ctx context.Context, link *transport.Link, dialer int
 	inbound := session.InboundFromContext(ctx)
 	if inbound != nil {
 		inboundConn = inbound.Conn
+		inbound.SetCanSpliceCopy(3)
 	}
 
 	outbound := session.OutboundFromContext(ctx)
 	if outbound == nil || !outbound.Target.IsValid() {
 		return newError("target not specified")
 	}
+	outbound.Name = "shadowsocks-2022"
 	destination := outbound.Target
 	network := destination.Network
 
@@ -93,34 +94,32 @@ func (o *Outbound) Process(ctx context.Context, link *transport.Link, dialer int
 	}
 
 	if network == net.Network_TCP {
-		serverConn := o.method.DialEarlyConn(connection, toSocksaddr(destination))
+		serverConn := o.method.DialEarlyConn(connection, singbridge.ToSocksaddr(destination))
 		var handshake bool
 		if timeoutReader, isTimeoutReader := link.Reader.(buf.TimeoutReader); isTimeoutReader {
 			mb, err := timeoutReader.ReadMultiBufferTimeout(time.Millisecond * 100)
 			if err != nil && err != buf.ErrNotTimeoutReader && err != buf.ErrReadTimeout {
 				return newError("read payload").Base(err)
 			}
-			_payload := B.StackNew()
-			payload := C.Dup(_payload)
-			defer payload.Release()
+			payload := B.New()
 			for {
-				payload.FullReset()
+				payload.Reset()
 				nb, n := buf.SplitBytes(mb, payload.FreeBytes())
 				if n > 0 {
 					payload.Truncate(n)
 					_, err = serverConn.Write(payload.Bytes())
 					if err != nil {
+						payload.Release()
 						return newError("write payload").Base(err)
 					}
 					handshake = true
 				}
 				if nb.IsEmpty() {
 					break
-				} else {
-					mb = nb
 				}
+				mb = nb
 			}
-			runtime.KeepAlive(_payload)
+			payload.Release()
 		}
 		if !handshake {
 			_, err = serverConn.Write(nil)
@@ -128,17 +127,7 @@ func (o *Outbound) Process(ctx context.Context, link *transport.Link, dialer int
 				return newError("client handshake").Base(err)
 			}
 		}
-		conn := &pipeConnWrapper{
-			W:    link.Writer,
-			Conn: inboundConn,
-		}
-		if ir, ok := link.Reader.(io.Reader); ok {
-			conn.R = ir
-		} else {
-			conn.R = &buf.BufferedReader{Reader: link.Reader}
-		}
-
-		return returnError(bufio.CopyConn(ctx, conn, serverConn))
+		return singbridge.CopyConn(ctx, inboundConn, link, serverConn)
 	} else {
 		var packetConn N.PacketConn
 		if pc, isPacketConn := inboundConn.(N.PacketConn); isPacketConn {
@@ -146,7 +135,7 @@ func (o *Outbound) Process(ctx context.Context, link *transport.Link, dialer int
 		} else if nc, isNetPacket := inboundConn.(net.PacketConn); isNetPacket {
 			packetConn = bufio.NewPacketConn(nc)
 		} else {
-			packetConn = &packetConnWrapper{
+			packetConn = &singbridge.PacketConnWrapper{
 				Reader: link.Reader,
 				Writer: link.Writer,
 				Conn:   inboundConn,
@@ -155,14 +144,14 @@ func (o *Outbound) Process(ctx context.Context, link *transport.Link, dialer int
 		}
 
 		if o.uotClient != nil {
-			uConn, err := o.uotClient.DialEarlyConn(o.method.DialEarlyConn(connection, uot.RequestDestination(o.uotClient.Version)), false, toSocksaddr(destination))
+			uConn, err := o.uotClient.DialEarlyConn(o.method.DialEarlyConn(connection, uot.RequestDestination(o.uotClient.Version)), false, singbridge.ToSocksaddr(destination))
 			if err != nil {
 				return err
 			}
-			return returnError(bufio.CopyPacketConn(ctx, packetConn, uConn))
+			return singbridge.ReturnError(bufio.CopyPacketConn(ctx, packetConn, uConn))
 		} else {
 			serverConn := o.method.DialPacketConn(connection)
-			return returnError(bufio.CopyPacketConn(ctx, packetConn, serverConn))
+			return singbridge.ReturnError(bufio.CopyPacketConn(ctx, packetConn, serverConn))
 		}
 	}
 }

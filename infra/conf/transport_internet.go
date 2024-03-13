@@ -11,7 +11,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/platform/filesystem"
 	"github.com/xtls/xray-core/common/protocol"
@@ -20,12 +19,14 @@ import (
 	"github.com/xtls/xray-core/transport/internet/domainsocket"
 	httpheader "github.com/xtls/xray-core/transport/internet/headers/http"
 	"github.com/xtls/xray-core/transport/internet/http"
+	"github.com/xtls/xray-core/transport/internet/httpupgrade"
 	"github.com/xtls/xray-core/transport/internet/kcp"
 	"github.com/xtls/xray-core/transport/internet/quic"
 	"github.com/xtls/xray-core/transport/internet/reality"
 	"github.com/xtls/xray-core/transport/internet/tcp"
 	"github.com/xtls/xray-core/transport/internet/tls"
 	"github.com/xtls/xray-core/transport/internet/websocket"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -174,6 +175,24 @@ func (c *WebSocketConfig) Build() (proto.Message, error) {
 		Path:   path,
 		Header: header,
 		Ed:     ed,
+	}
+	if c.AcceptProxyProtocol {
+		config.AcceptProxyProtocol = c.AcceptProxyProtocol
+	}
+	return config, nil
+}
+
+type HttpUpgradeConfig struct {
+	Path                string `json:"path"`
+	Host                string `json:"host"`
+	AcceptProxyProtocol bool   `json:"acceptProxyProtocol"`
+}
+
+// Build implements Buildable.
+func (c *HttpUpgradeConfig) Build() (proto.Message, error) {
+	config := &httpupgrade.Config{
+		Path: c.Path,
+		Host: c.Host,
 	}
 	if c.AcceptProxyProtocol {
 		config.AcceptProxyProtocol = c.AcceptProxyProtocol
@@ -357,6 +376,7 @@ type TLSConfig struct {
 	RejectUnknownSNI                     bool             `json:"rejectUnknownSni"`
 	PinnedPeerCertificateChainSha256     *[]string        `json:"pinnedPeerCertificateChainSha256"`
 	PinnedPeerCertificatePublicKeySha256 *[]string        `json:"pinnedPeerCertificatePublicKeySha256"`
+	MasterKeyLog                         string           `json:"masterKeyLog"`
 }
 
 // Build implements Buildable.
@@ -412,11 +432,14 @@ func (c *TLSConfig) Build() (proto.Message, error) {
 		}
 	}
 
+	config.MasterKeyLog = c.MasterKeyLog
+
 	return config, nil
 }
 
 type REALITYConfig struct {
 	Show         bool            `json:"show"`
+	MasterKeyLog string          `json:"masterKeyLog"`
 	Dest         json.RawMessage `json:"dest"`
 	Type         string          `json:"type"`
 	Xver         uint64          `json:"xver"`
@@ -437,6 +460,7 @@ type REALITYConfig struct {
 func (c *REALITYConfig) Build() (proto.Message, error) {
 	config := new(reality.Config)
 	config.Show = c.Show
+	config.MasterKeyLog = c.MasterKeyLog
 	var err error
 	if c.Dest != nil {
 		var i uint16
@@ -601,6 +625,8 @@ func (p TransportProtocol) Build() (string, error) {
 		return "quic", nil
 	case "grpc", "gun":
 		return "grpc", nil
+	case "httpupgrade":
+		return "httpupgrade", nil
 	default:
 		return "", newError("Config: unknown transport protocol: ", p)
 	}
@@ -617,8 +643,12 @@ type SocketConfig struct {
 	TCPKeepAliveIdle     int32       `json:"tcpKeepAliveIdle"`
 	TCPCongestion        string      `json:"tcpCongestion"`
 	TCPWindowClamp       int32       `json:"tcpWindowClamp"`
+	TCPMaxSeg            int32       `json:"tcpMaxSeg"`
+	TcpNoDelay           bool        `json:"tcpNoDelay"`
+	TCPUserTimeout       int32       `json:"tcpUserTimeout"`
 	V6only               bool        `json:"v6only"`
 	Interface            string      `json:"interface"`
+	TcpMptcp             bool        `json:"tcpMptcp"`
 }
 
 // Build implements Buildable.
@@ -650,12 +680,30 @@ func (c *SocketConfig) Build() (*internet.SocketConfig, error) {
 
 	dStrategy := internet.DomainStrategy_AS_IS
 	switch strings.ToLower(c.DomainStrategy) {
-	case "useip", "use_ip":
+	case "asis", "":
+		dStrategy = internet.DomainStrategy_AS_IS
+	case "useip":
 		dStrategy = internet.DomainStrategy_USE_IP
-	case "useip4", "useipv4", "use_ipv4", "use_ip_v4", "use_ip4":
+	case "useipv4":
 		dStrategy = internet.DomainStrategy_USE_IP4
-	case "useip6", "useipv6", "use_ipv6", "use_ip_v6", "use_ip6":
+	case "useipv6":
 		dStrategy = internet.DomainStrategy_USE_IP6
+	case "useipv4v6":
+		dStrategy = internet.DomainStrategy_USE_IP46
+	case "useipv6v4":
+		dStrategy = internet.DomainStrategy_USE_IP64
+	case "forceip":
+		dStrategy = internet.DomainStrategy_FORCE_IP
+	case "forceipv4":
+		dStrategy = internet.DomainStrategy_FORCE_IP4
+	case "forceipv6":
+		dStrategy = internet.DomainStrategy_FORCE_IP6
+	case "forceipv4v6":
+		dStrategy = internet.DomainStrategy_FORCE_IP46
+	case "forceipv6v4":
+		dStrategy = internet.DomainStrategy_FORCE_IP64
+	default:
+		return nil, newError("unsupported domain strategy: ", c.DomainStrategy)
 	}
 
 	return &internet.SocketConfig{
@@ -669,25 +717,30 @@ func (c *SocketConfig) Build() (*internet.SocketConfig, error) {
 		TcpKeepAliveIdle:     c.TCPKeepAliveIdle,
 		TcpCongestion:        c.TCPCongestion,
 		TcpWindowClamp:       c.TCPWindowClamp,
+		TcpMaxSeg:            c.TCPMaxSeg,
+		TcpNoDelay:           c.TcpNoDelay,
+		TcpUserTimeout:       c.TCPUserTimeout,
 		V6Only:               c.V6only,
 		Interface:            c.Interface,
+		TcpMptcp:             c.TcpMptcp,
 	}, nil
 }
 
 type StreamConfig struct {
-	Network         *TransportProtocol  `json:"network"`
-	Security        string              `json:"security"`
-	TLSSettings     *TLSConfig          `json:"tlsSettings"`
-	REALITYSettings *REALITYConfig      `json:"realitySettings"`
-	TCPSettings     *TCPConfig          `json:"tcpSettings"`
-	KCPSettings     *KCPConfig          `json:"kcpSettings"`
-	WSSettings      *WebSocketConfig    `json:"wsSettings"`
-	HTTPSettings    *HTTPConfig         `json:"httpSettings"`
-	DSSettings      *DomainSocketConfig `json:"dsSettings"`
-	QUICSettings    *QUICConfig         `json:"quicSettings"`
-	SocketSettings  *SocketConfig       `json:"sockopt"`
-	GRPCConfig      *GRPCConfig         `json:"grpcSettings"`
-	GUNConfig       *GRPCConfig         `json:"gunSettings"`
+	Network             *TransportProtocol  `json:"network"`
+	Security            string              `json:"security"`
+	TLSSettings         *TLSConfig          `json:"tlsSettings"`
+	REALITYSettings     *REALITYConfig      `json:"realitySettings"`
+	TCPSettings         *TCPConfig          `json:"tcpSettings"`
+	KCPSettings         *KCPConfig          `json:"kcpSettings"`
+	WSSettings          *WebSocketConfig    `json:"wsSettings"`
+	HTTPSettings        *HTTPConfig         `json:"httpSettings"`
+	DSSettings          *DomainSocketConfig `json:"dsSettings"`
+	QUICSettings        *QUICConfig         `json:"quicSettings"`
+	SocketSettings      *SocketConfig       `json:"sockopt"`
+	GRPCConfig          *GRPCConfig         `json:"grpcSettings"`
+	GUNConfig           *GRPCConfig         `json:"gunSettings"`
+	HTTPUPGRADESettings *HttpUpgradeConfig  `json:"httpupgradeSettings"`
 }
 
 // Build implements Buildable.
@@ -806,6 +859,16 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
 		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
 			ProtocolName: "grpc",
 			Settings:     serial.ToTypedMessage(gs),
+		})
+	}
+	if c.HTTPUPGRADESettings != nil {
+		hs, err := c.HTTPUPGRADESettings.Build()
+		if err != nil {
+			return nil, newError("Failed to build HttpUpgrade config.").Base(err)
+		}
+		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+			ProtocolName: "httpupgrade",
+			Settings:     serial.ToTypedMessage(hs),
 		})
 	}
 	if c.SocketSettings != nil {

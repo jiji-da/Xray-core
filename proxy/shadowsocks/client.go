@@ -58,6 +58,11 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 	if outbound == nil || !outbound.Target.IsValid() {
 		return newError("target not specified")
 	}
+	outbound.Name = "shadowsocks"
+	inbound := session.InboundFromContext(ctx)
+	if inbound != nil {
+		inbound.SetCanSpliceCopy(3)
+	}
 	destination := outbound.Target
 	network := destination.Network
 
@@ -171,6 +176,7 @@ func (c *Client) Process(ctx context.Context, link *transport.Link, dialer inter
 				Writer:  conn,
 				Request: request,
 			}
+
 			if err := buf.Copy(link.Reader, writer, buf.UpdateActivity(timer)); err != nil {
 				return newError("failed to transport all UDP request").Base(err)
 			}

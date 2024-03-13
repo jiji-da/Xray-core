@@ -5,6 +5,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sagernet/sing/common/control"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/features/dns"
@@ -15,10 +16,11 @@ var effectiveSystemDialer SystemDialer = &DefaultSystemDialer{}
 
 type SystemDialer interface {
 	Dial(ctx context.Context, source net.Address, destination net.Destination, sockopt *SocketConfig) (net.Conn, error)
+	DestIpAddress() net.IP
 }
 
 type DefaultSystemDialer struct {
-	controllers []controller
+	controllers []control.Func
 	dns         dns.Client
 	obm         outbound.Manager
 }
@@ -64,6 +66,17 @@ func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest ne
 		if err != nil {
 			return nil, err
 		}
+		if sockopt != nil {
+			sys, err := packetConn.(*net.UDPConn).SyscallConn()
+			if err != nil {
+				return nil, err
+			}
+			sys.Control(func(fd uintptr) {
+				if err := applyOutboundSocketOptions("udp", dest.NetAddr(), fd, sockopt); err != nil {
+					newError("failed to apply socket options").Base(err).WriteToLog(session.ExportIDToError(ctx))
+				}
+			})
+		}
 		return &PacketConnWrapper{
 			Conn: packetConn,
 			Dest: destAddr,
@@ -80,7 +93,15 @@ func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest ne
 	}
 
 	if sockopt != nil || len(d.controllers) > 0 {
+		if sockopt != nil && sockopt.TcpMptcp {
+			dialer.SetMultipathTCP(true)
+		}
 		dialer.Control = func(network, address string, c syscall.RawConn) error {
+			for _, ctl := range d.controllers {
+				if err := ctl(network, address, c); err != nil {
+					newError("failed to apply external controller").Base(err).WriteToLog(session.ExportIDToError(ctx))
+				}
+			}
 			return c.Control(func(fd uintptr) {
 				if sockopt != nil {
 					if err := applyOutboundSocketOptions(network, address, fd, sockopt); err != nil {
@@ -92,17 +113,15 @@ func (d *DefaultSystemDialer) Dial(ctx context.Context, src net.Address, dest ne
 						}
 					}
 				}
-
-				for _, ctl := range d.controllers {
-					if err := ctl(network, address, fd); err != nil {
-						newError("failed to apply external controller").Base(err).WriteToLog(session.ExportIDToError(ctx))
-					}
-				}
 			})
 		}
 	}
 
 	return dialer.DialContext(ctx, dest.Network.SystemString(), dest.NetAddr())
+}
+
+func (d *DefaultSystemDialer) DestIpAddress() net.IP {
+	return nil
 }
 
 type PacketConnWrapper struct {
@@ -169,6 +188,10 @@ func (v *SimpleSystemDialer) Dial(ctx context.Context, src net.Address, dest net
 	return v.adapter.Dial(dest.Network.SystemString(), dest.NetAddr())
 }
 
+func (d *SimpleSystemDialer) DestIpAddress() net.IP {
+	return nil
+}
+
 // UseAlternativeSystemDialer replaces the current system dialer with a given one.
 // Caller must ensure there is no race condition.
 //
@@ -185,7 +208,7 @@ func UseAlternativeSystemDialer(dialer SystemDialer) {
 // It only works when effective dialer is the default dialer.
 //
 // xray:api:beta
-func RegisterDialerController(ctl func(network, address string, fd uintptr) error) error {
+func RegisterDialerController(ctl control.Func) error {
 	if ctl == nil {
 		return newError("nil listener controller")
 	}

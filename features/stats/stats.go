@@ -73,6 +73,7 @@ type Manager interface {
 	GetCounter(string) Counter
 	GetRateLimiter(string) *rate.Limiter
 	RegisterRateLimiter(string, int) (*rate.Limiter, error)
+
 	// RegisterChannel registers a new channel to the manager. The identifier string must not be empty, and unique among other channels.
 	RegisterChannel(string) (Channel, error)
 	// UnregisterChannel unregisters a channel from the manager by its identifier.
@@ -139,6 +140,7 @@ func (NoopManager) UnregisterCounter(string) error {
 func (NoopManager) GetCounter(string) Counter {
 	return nil
 }
+
 func (NoopManager) RegisterRateLimiter(string, int) (*rate.Limiter, error) {
 	return nil, newError("not implemented")
 
