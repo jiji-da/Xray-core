@@ -79,13 +79,10 @@ message RoutingRule {
     // Tag of routing balancer.
     string balancing_tag = 12;
   }
+    string rule_tag = 18;
 
   // List of domains for target domain matching.
   repeated Domain domain = 2;
-
-  // List of CIDRs for target IP address matching.
-  // Deprecated. Use geoip below.
-  repeated CIDR cidr = 3 [deprecated = true];
 
   // List of GeoIPs for target IP address matching. If this entry exists, the
   // cidr above will have no effect. GeoIP fields with the same country code are
@@ -93,21 +90,11 @@ message RoutingRule {
   // runtime. For customized GeoIPs, please leave country code empty.
   repeated GeoIP geoip = 10;
 
-  // A range of port [from, to]. If the destination port is in this range, this
-  // rule takes effect. Deprecated. Use port_list.
-  xray.common.net.PortRange port_range = 4 [deprecated = true];
-
   // List of ports.
   xray.common.net.PortList port_list = 14;
 
-  // List of networks. Deprecated. Use networks.
-  xray.common.net.NetworkList network_list = 5 [deprecated = true];
-
   // List of networks for matching.
   repeated xray.common.net.Network networks = 13;
-
-  // List of CIDRs for source IP address matching.
-  repeated CIDR source_cidr = 6 [deprecated = true];
 
   // List of GeoIPs for source IP address matching. If this entry exists, the
   // source_cidr above will have no effect.
@@ -146,7 +133,7 @@ message StrategyLeastLoadConfig {
   repeated int64 baselines = 3;
   // expected nodes count to select
   int32 expected = 4;
-  // max acceptable rtt, filter away high delay nodes. defalut 0
+  // max acceptable rtt, filter away high delay nodes. default 0
   int64 maxRTT = 5;
   // acceptable failure rate
   float tolerance = 6;

@@ -43,13 +43,13 @@ const (
 )
 
 type RequestHeader struct {
-	Version    byte
-	Command    RequestCommand
-	Option     bitmask.Byte
-	Security   SecurityType
-	Port       net.Port
-	Address    net.Address
-	User       *MemoryUser
+	Version  byte
+	Command  RequestCommand
+	Option   bitmask.Byte
+	Security SecurityType
+	Port     net.Port
+	Address  net.Address
+	User     *MemoryUser
 	Sni        string
 	UdpSpeeder uint32
 }

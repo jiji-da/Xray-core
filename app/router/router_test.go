@@ -45,7 +45,9 @@ func TestSimpleRouter(t *testing.T) {
 		HandlerSelector: mockHs,
 	}, nil))
 
-	ctx := session.ContextWithOutbound(context.Background(), &session.Outbound{Target: net.TCPDestination(net.DomainAddress("example.com"), 80)})
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{{
+		Target: net.TCPDestination(net.DomainAddress("example.com"), 80),
+	}})
 	route, err := r.PickRoute(routing_session.AsRoutingContext(ctx))
 	common.Must(err)
 	if tag := route.GetOutboundTag(); tag != "test" {
@@ -86,7 +88,9 @@ func TestSimpleBalancer(t *testing.T) {
 		HandlerSelector: mockHs,
 	}, nil))
 
-	ctx := session.ContextWithOutbound(context.Background(), &session.Outbound{Target: net.TCPDestination(net.DomainAddress("example.com"), 80)})
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{{
+		Target: net.TCPDestination(net.DomainAddress("example.com"), 80),
+	}})
 	route, err := r.PickRoute(routing_session.AsRoutingContext(ctx))
 	common.Must(err)
 	if tag := route.GetOutboundTag(); tag != "test" {
@@ -151,10 +155,14 @@ func TestIPOnDemand(t *testing.T) {
 				TargetTag: &RoutingRule_Tag{
 					Tag: "test",
 				},
-				Cidr: []*CIDR{
+				Geoip: []*GeoIP{
 					{
-						Ip:     []byte{192, 168, 0, 0},
-						Prefix: 16,
+						Cidr: []*CIDR{
+							{
+								Ip:     []byte{192, 168, 0, 0},
+								Prefix: 16,
+							},
+						},
 					},
 				},
 			},
@@ -174,7 +182,9 @@ func TestIPOnDemand(t *testing.T) {
 	r := new(Router)
 	common.Must(r.Init(context.TODO(), config, mockDNS, nil, nil))
 
-	ctx := session.ContextWithOutbound(context.Background(), &session.Outbound{Target: net.TCPDestination(net.DomainAddress("example.com"), 80)})
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{{
+		Target: net.TCPDestination(net.DomainAddress("example.com"), 80),
+	}})
 	route, err := r.PickRoute(routing_session.AsRoutingContext(ctx))
 	common.Must(err)
 	if tag := route.GetOutboundTag(); tag != "test" {
@@ -190,10 +200,14 @@ func TestIPIfNonMatchDomain(t *testing.T) {
 				TargetTag: &RoutingRule_Tag{
 					Tag: "test",
 				},
-				Cidr: []*CIDR{
+				Geoip: []*GeoIP{
 					{
-						Ip:     []byte{192, 168, 0, 0},
-						Prefix: 16,
+						Cidr: []*CIDR{
+							{
+								Ip:     []byte{192, 168, 0, 0},
+								Prefix: 16,
+							},
+						},
 					},
 				},
 			},
@@ -213,7 +227,9 @@ func TestIPIfNonMatchDomain(t *testing.T) {
 	r := new(Router)
 	common.Must(r.Init(context.TODO(), config, mockDNS, nil, nil))
 
-	ctx := session.ContextWithOutbound(context.Background(), &session.Outbound{Target: net.TCPDestination(net.DomainAddress("example.com"), 80)})
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{{
+		Target: net.TCPDestination(net.DomainAddress("example.com"), 80),
+	}})
 	route, err := r.PickRoute(routing_session.AsRoutingContext(ctx))
 	common.Must(err)
 	if tag := route.GetOutboundTag(); tag != "test" {
@@ -229,10 +245,14 @@ func TestIPIfNonMatchIP(t *testing.T) {
 				TargetTag: &RoutingRule_Tag{
 					Tag: "test",
 				},
-				Cidr: []*CIDR{
+				Geoip: []*GeoIP{
 					{
-						Ip:     []byte{127, 0, 0, 0},
-						Prefix: 8,
+						Cidr: []*CIDR{
+							{
+								Ip:     []byte{127, 0, 0, 0},
+								Prefix: 8,
+							},
+						},
 					},
 				},
 			},
@@ -247,7 +267,9 @@ func TestIPIfNonMatchIP(t *testing.T) {
 	r := new(Router)
 	common.Must(r.Init(context.TODO(), config, mockDNS, nil, nil))
 
-	ctx := session.ContextWithOutbound(context.Background(), &session.Outbound{Target: net.TCPDestination(net.LocalHostIP, 80)})
+	ctx := session.ContextWithOutbounds(context.Background(), []*session.Outbound{{
+		Target: net.TCPDestination(net.LocalHostIP, 80),
+	}})
 	route, err := r.PickRoute(routing_session.AsRoutingContext(ctx))
 	common.Must(err)
 	if tag := route.GetOutboundTag(); tag != "test" {

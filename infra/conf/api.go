@@ -9,17 +9,19 @@ import (
 	handlerservice "github.com/xtls/xray-core/app/proxyman/command"
 	routerservice "github.com/xtls/xray-core/app/router/command"
 	statsservice "github.com/xtls/xray-core/app/stats/command"
+	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/serial"
 )
 
 type APIConfig struct {
 	Tag      string   `json:"tag"`
+	Listen   string   `json:"listen"`
 	Services []string `json:"services"`
 }
 
 func (c *APIConfig) Build() (*commander.Config, error) {
 	if c.Tag == "" {
-		return nil, newError("API tag can't be empty.")
+		return nil, errors.New("API tag can't be empty.")
 	}
 
 	services := make([]*serial.TypedMessage, 0, 16)
@@ -42,6 +44,7 @@ func (c *APIConfig) Build() (*commander.Config, error) {
 
 	return &commander.Config{
 		Tag:     c.Tag,
+		Listen:  c.Listen,
 		Service: services,
 	}, nil
 }

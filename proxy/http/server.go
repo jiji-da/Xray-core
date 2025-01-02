@@ -2,6 +2,7 @@ package http
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"io"
@@ -42,27 +43,9 @@ func NewServer(ctx context.Context, config *ServerConfig) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) AddUser(ctx context.Context, u *protocol.MemoryUser) error {
-	_, found := s.config.Accounts[u.Email]
-	if found {
-		return newError("User ", u.Email, " already exists.")
-	}
-	s.config.Accounts[u.Email] = u.Email
-
-	return nil
-}
-
-func (s *Server) RemoveUser(ctx context.Context, e string) error {
-	delete(s.config.Accounts, e)
-	return nil
-}
-
 func (s *Server) policy() policy.Session {
 	config := s.config
 	p := s.policyManager.ForLevel(config.UserLevel)
-	if config.Timeout > 0 && config.UserLevel == 0 {
-		p.Timeouts.ConnectionIdle = time.Duration(config.Timeout) * time.Second
-	}
 	return p
 }
 
@@ -98,23 +81,37 @@ type readerOnly struct {
 }
 
 func (s *Server) Process(ctx context.Context, network net.Network, conn stat.Connection, dispatcher routing.Dispatcher) error {
+	return s.ProcessWithFirstbyte(ctx, network, conn, dispatcher)
+}
+
+// Firstbyte is for forwarded conn from SOCKS inbound
+// Because it needs first byte to choose protocol
+// We need to add it back
+// Other parts are the same as the process function
+func (s *Server) ProcessWithFirstbyte(ctx context.Context, network net.Network, conn stat.Connection, dispatcher routing.Dispatcher, firstbyte ...byte) error {
 	inbound := session.InboundFromContext(ctx)
 	inbound.Name = "http"
-	inbound.SetCanSpliceCopy(2)
+	inbound.CanSpliceCopy = 2
 	inbound.User = &protocol.MemoryUser{
 		Level: s.config.UserLevel,
 	}
-
-	reader := bufio.NewReaderSize(readerOnly{conn}, buf.Size)
+	var reader *bufio.Reader
+	if len(firstbyte) > 0 {
+		readerWithoutFirstbyte := bufio.NewReaderSize(readerOnly{conn}, buf.Size)
+		multiReader := io.MultiReader(bytes.NewReader(firstbyte), readerWithoutFirstbyte)
+		reader = bufio.NewReaderSize(multiReader, buf.Size)
+	} else {
+		reader = bufio.NewReaderSize(readerOnly{conn}, buf.Size)
+	}
 
 Start:
 	if err := conn.SetReadDeadline(time.Now().Add(s.policy().Timeouts.Handshake)); err != nil {
-		newError("failed to set read deadline").Base(err).WriteToLog(session.ExportIDToError(ctx))
+		errors.LogInfoInner(ctx, err, "failed to set read deadline")
 	}
 
 	request, err := http.ReadRequest(reader)
 	if err != nil {
-		trace := newError("failed to read http request").Base(err)
+		trace := errors.New("failed to read http request").Base(err)
 		if errors.Cause(err) != io.EOF && !isTimeout(errors.Cause(err)) {
 			trace.AtWarning()
 		}
@@ -122,7 +119,7 @@ Start:
 	}
 
 	if len(s.config.Accounts) > 0 {
-		user, pass, ok := parseBasicAuth(request.Header.Get("Fake-Author"))
+		user, pass, ok := parseBasicAuth(request.Header.Get("Proxy-Authorization"))
 		if !ok || !s.config.HasAccount(user, pass) {
 			return common.Error2(conn.Write([]byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"proxy\"\r\n\r\n")))
 		}
@@ -131,9 +128,9 @@ Start:
 		}
 	}
 
-	newError("request to Method [", request.Method, "] Host [", request.Host, "] with URL [", request.URL, "]").WriteToLog(session.ExportIDToError(ctx))
+	errors.LogInfo(ctx, "request to Method [", request.Method, "] Host [", request.Host, "] with URL [", request.URL, "]")
 	if err := conn.SetReadDeadline(time.Time{}); err != nil {
-		newError("failed to clear read deadline").Base(err).WriteToLog(session.ExportIDToError(ctx))
+		errors.LogDebugInner(ctx, err, "failed to clear read deadline")
 	}
 
 	defaultPort := net.Port(80)
@@ -146,7 +143,7 @@ Start:
 	}
 	dest, err := http_proto.ParseHost(host, defaultPort)
 	if err != nil {
-		return newError("malformed proxy host: ", host).AtWarning().Base(err)
+		return errors.New("malformed proxy host: ", host).AtWarning().Base(err)
 	}
 	ctx = log.ContextWithAccessMessage(ctx, &log.AccessMessage{
 		From:   conn.RemoteAddr(),
@@ -175,7 +172,7 @@ Start:
 func (s *Server) handleConnect(ctx context.Context, _ *http.Request, reader *bufio.Reader, conn stat.Connection, dest net.Destination, dispatcher routing.Dispatcher, inbound *session.Inbound) error {
 	_, err := conn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
 	if err != nil {
-		return newError("failed to write back OK response").Base(err)
+		return errors.New("failed to write back OK response").Base(err)
 	}
 
 	plcy := s.policy()
@@ -224,13 +221,13 @@ func (s *Server) handleConnect(ctx context.Context, _ *http.Request, reader *buf
 	if err := task.Run(ctx, closeWriter, responseDone); err != nil {
 		common.Interrupt(link.Reader)
 		common.Interrupt(link.Writer)
-		return newError("connection ends").Base(err)
+		return errors.New("connection ends").Base(err)
 	}
 
 	return nil
 }
 
-var errWaitAnother = newError("keep alive")
+var errWaitAnother = errors.New("keep alive")
 
 func (s *Server) handlePlainHTTP(ctx context.Context, request *http.Request, writer io.Writer, dest net.Destination, dispatcher routing.Dispatcher) error {
 	if !s.config.AllowTransparent && request.URL.Host == "" {
@@ -289,7 +286,7 @@ func (s *Server) handlePlainHTTP(ctx context.Context, request *http.Request, wri
 		requestWriter := buf.NewBufferedWriter(link.Writer)
 		common.Must(requestWriter.SetBuffered(false))
 		if err := request.Write(requestWriter); err != nil {
-			return newError("failed to write whole request").Base(err).AtWarning()
+			return errors.New("failed to write whole request").Base(err).AtWarning()
 		}
 		return nil
 	}
@@ -302,7 +299,7 @@ func (s *Server) handlePlainHTTP(ctx context.Context, request *http.Request, wri
 			if response.ContentLength >= 0 {
 				response.Header.Set("Proxy-Connection", "keep-alive")
 				response.Header.Set("Connection", "keep-alive")
-				response.Header.Set("Keep-Alive", "timeout=4")
+				response.Header.Set("Keep-Alive", "timeout=60")
 				response.Close = false
 			} else {
 				response.Close = true
@@ -310,7 +307,7 @@ func (s *Server) handlePlainHTTP(ctx context.Context, request *http.Request, wri
 			}
 			defer response.Body.Close()
 		} else {
-			newError("failed to read response from ", request.Host).Base(err).AtWarning().WriteToLog(session.ExportIDToError(ctx))
+			errors.LogWarningInner(ctx, err, "failed to read response from ", request.Host)
 			response = &http.Response{
 				Status:        "Service Unavailable",
 				StatusCode:    503,
@@ -326,7 +323,7 @@ func (s *Server) handlePlainHTTP(ctx context.Context, request *http.Request, wri
 			response.Header.Set("Proxy-Connection", "close")
 		}
 		if err := response.Write(writer); err != nil {
-			return newError("failed to write response").Base(err).AtWarning()
+			return errors.New("failed to write response").Base(err).AtWarning()
 		}
 		return nil
 	}
@@ -334,7 +331,7 @@ func (s *Server) handlePlainHTTP(ctx context.Context, request *http.Request, wri
 	if err := task.Run(ctx, requestDone, responseDone); err != nil {
 		common.Interrupt(link.Reader)
 		common.Interrupt(link.Writer)
-		return newError("connection ends").Base(err)
+		return errors.New("connection ends").Base(err)
 	}
 
 	return result

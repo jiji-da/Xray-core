@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/xtls/xray-core/app/observatory"
-	"github.com/xtls/xray-core/common"
 	"github.com/xtls/xray-core/common/dice"
+	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/extension"
 )
@@ -57,8 +57,11 @@ type node struct {
 	RTTDeviationCost time.Duration
 }
 
-func (l *LeastLoadStrategy) InjectContext(ctx context.Context) {
-	l.ctx = ctx
+func (s *LeastLoadStrategy) InjectContext(ctx context.Context) {
+	s.ctx = ctx
+	core.RequireFeaturesAsync(s.ctx, func(observatory extension.Observatory) {
+		s.observer = observatory
+	})
 }
 
 func (s *LeastLoadStrategy) PickOutbound(candidates []string) string {
@@ -95,7 +98,7 @@ func (s *LeastLoadStrategy) pickOutbounds(candidates []string) []*node {
 // with 'balancer.fallbackTag', it means: selects qualified nodes or use the fallback.
 func (s *LeastLoadStrategy) selectLeastLoad(nodes []*node) []*node {
 	if len(nodes) == 0 {
-		newError("least load: no qualified outbound").AtInfo().WriteToLog()
+		errors.LogInfo(s.ctx, "least load: no qualified outbound")
 		return nil
 	}
 	expected := int(s.settings.Expected)
@@ -123,7 +126,7 @@ func (s *LeastLoadStrategy) selectLeastLoad(nodes []*node) []*node {
 		}
 		// don't continue if find expected selects
 		if count >= expected {
-			newError("applied baseline: ", baseline).AtDebug().WriteToLog()
+			errors.LogDebug(s.ctx, "applied baseline: ", baseline)
 			break
 		}
 	}
@@ -135,14 +138,12 @@ func (s *LeastLoadStrategy) selectLeastLoad(nodes []*node) []*node {
 
 func (s *LeastLoadStrategy) getNodes(candidates []string, maxRTT time.Duration) []*node {
 	if s.observer == nil {
-		common.Must(core.RequireFeatures(s.ctx, func(observatory extension.Observatory) error {
-			s.observer = observatory
-			return nil
-		}))
+		errors.LogError(s.ctx, "observer is nil")
+		return make([]*node, 0)
 	}
 	observeResult, err := s.observer.GetObservation(s.ctx)
 	if err != nil {
-		newError("cannot get observation").Base(err).WriteToLog()
+		errors.LogInfoInner(s.ctx, err, "cannot get observation")
 		return make([]*node, 0)
 	}
 

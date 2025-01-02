@@ -2,9 +2,9 @@ package conf
 
 import (
 	"google.golang.org/protobuf/proto"
-	
-	"github.com/xtls/xray-core/app/router"
+
 	"github.com/xtls/xray-core/app/observatory/burst"
+	"github.com/xtls/xray-core/app/router"
 	"github.com/xtls/xray-core/infra/conf/cfgcommon/duration"
 )
 
@@ -38,7 +38,7 @@ type strategyLeastLoadConfig struct {
 	Baselines []duration.Duration `json:"baselines,omitempty"`
 	// expected nodes count to select
 	Expected int32 `json:"expected,omitempty"`
-	// max acceptable rtt, filter away high delay nodes. defalut 0
+	// max acceptable rtt, filter away high delay nodes. default 0
 	MaxRTT duration.Duration `json:"maxRTT,omitempty"`
 	// acceptable failure rate
 	Tolerance float64 `json:"tolerance,omitempty"`
@@ -46,10 +46,10 @@ type strategyLeastLoadConfig struct {
 
 // healthCheckSettings holds settings for health Checker
 type healthCheckSettings struct {
-	Destination   string   `json:"destination"`
-	Connectivity  string   `json:"connectivity"`
+	Destination   string            `json:"destination"`
+	Connectivity  string            `json:"connectivity"`
 	Interval      duration.Duration `json:"interval"`
-	SamplingCount int      `json:"sampling"`
+	SamplingCount int               `json:"sampling"`
 	Timeout       duration.Duration `json:"timeout"`
 }
 

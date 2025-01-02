@@ -2,15 +2,18 @@ package burst
 
 import (
 	"context"
-	
-	"github.com/xtls/xray-core/core"
+
+	"sync"
+
 	"github.com/xtls/xray-core/app/observatory"
 	"github.com/xtls/xray-core/common"
+	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/signal/done"
+	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/extension"
 	"github.com/xtls/xray-core/features/outbound"
+	"github.com/xtls/xray-core/features/routing"
 	"google.golang.org/protobuf/proto"
-	"sync"
 )
 
 type Observer struct {
@@ -66,7 +69,7 @@ func (o *Observer) Start() error {
 			hs, ok := o.ohm.(outbound.HandlerSelector)
 			if !ok {
 
-				return nil, newError("outbound.Manager is not a HandlerSelector")
+				return nil, errors.New("outbound.Manager is not a HandlerSelector")
 			}
 
 			outbounds := hs.Select(o.config.SubjectSelector)
@@ -86,13 +89,15 @@ func (o *Observer) Close() error {
 
 func New(ctx context.Context, config *Config) (*Observer, error) {
 	var outboundManager outbound.Manager
-	err := core.RequireFeatures(ctx, func(om outbound.Manager) {
+	var dispatcher routing.Dispatcher
+	err := core.RequireFeatures(ctx, func(om outbound.Manager, rd routing.Dispatcher) {
 		outboundManager = om
+		dispatcher = rd
 	})
 	if err != nil {
-		return nil, newError("Cannot get depended features").Base(err)
+		return nil, errors.New("Cannot get depended features").Base(err)
 	}
-	hp := NewHealthPing(ctx, config.PingConfig)
+	hp := NewHealthPing(ctx, dispatcher, config.PingConfig)
 	return &Observer{
 		config: config,
 		ctx:    ctx,

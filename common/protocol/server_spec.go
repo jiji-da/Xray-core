@@ -75,10 +75,6 @@ func (s *ServerSpec) Destination() net.Destination {
 	return s.dest
 }
 
-func (s *ServerSpec) SetDestination(dest net.Destination) {
-	s.dest = dest
-}
-
 func (s *ServerSpec) HasUser(user *MemoryUser) bool {
 	s.RLock()
 	defer s.RUnlock()

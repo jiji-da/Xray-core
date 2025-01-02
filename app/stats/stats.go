@@ -1,7 +1,5 @@
 package stats
 
-//go:generate go run github.com/xtls/xray-core/common/errors/errorgen
-
 import (
 	"context"
 	"golang.org/x/time/rate"
@@ -14,19 +12,21 @@ import (
 
 // Manager is an implementation of stats.Manager.
 type Manager struct {
-	access   sync.RWMutex
-	counters map[string]*Counter
-	limiters map[string]*rate.Limiter
-	channels map[string]*Channel
-	running  bool
+	access    sync.RWMutex
+	counters  map[string]*Counter
+	limiters  map[string]*rate.Limiter
+	onlineMap map[string]*OnlineMap
+	channels  map[string]*Channel
+	running   bool
 }
 
 // NewManager creates an instance of Statistics Manager.
 func NewManager(ctx context.Context, config *Config) (*Manager, error) {
 	m := &Manager{
-		counters: make(map[string]*Counter),
-		limiters: make(map[string]*rate.Limiter),
-		channels: make(map[string]*Channel),
+		counters:  make(map[string]*Counter),
+		limiters:  make(map[string]*rate.Limiter),
+		onlineMap: make(map[string]*OnlineMap),
+		channels:  make(map[string]*Channel),
 	}
 
 	return m, nil
@@ -43,9 +43,9 @@ func (m *Manager) RegisterCounter(name string) (stats.Counter, error) {
 	defer m.access.Unlock()
 
 	if _, found := m.counters[name]; found {
-		return nil, newError("Counter ", name, " already registered.")
+		return nil, errors.New("Counter ", name, " already registered.")
 	}
-	newError("create new counter ", name).AtDebug().WriteToLog()
+	errors.LogDebug(context.Background(), "create new counter ", name)
 	c := new(Counter)
 	m.counters[name] = c
 	return c, nil
@@ -57,7 +57,7 @@ func (m *Manager) UnregisterCounter(name string) error {
 	defer m.access.Unlock()
 
 	if _, found := m.counters[name]; found {
-		newError("remove counter ", name).AtDebug().WriteToLog()
+		errors.LogDebug(context.Background(), "remove counter ", name)
 		delete(m.counters, name)
 	}
 	return nil
@@ -78,9 +78,9 @@ func (m *Manager) RegisterRateLimiter(name string, rateLimit int) (*rate.Limiter
 	defer m.access.Unlock()
 
 	if _, found := m.limiters[name]; found {
-		return nil, newError("Limiter ", name, " already registered.")
+		return nil, errors.New("Limiter ", name, " already registered.")
 	}
-	newError("create new Limiter ", name).AtDebug().WriteToLog()
+	errors.LogDebug(context.Background(), "create new Limiter ", name)
 	c := rate.NewLimiter(rate.Limit(rateLimit), rateLimit)
 	m.limiters[name] = c
 	return c, nil
@@ -107,15 +107,52 @@ func (m *Manager) VisitCounters(visitor func(string, stats.Counter) bool) {
 	}
 }
 
+// RegisterOnlineMap implements stats.Manager.
+func (m *Manager) RegisterOnlineMap(name string) (stats.OnlineMap, error) {
+	m.access.Lock()
+	defer m.access.Unlock()
+
+	if _, found := m.onlineMap[name]; found {
+		return nil, errors.New("onlineMap ", name, " already registered.")
+	}
+	errors.LogDebug(context.Background(), "create new onlineMap ", name)
+	om := NewOnlineMap()
+	m.onlineMap[name] = om
+	return om, nil
+}
+
+// UnregisterOnlineMap implements stats.Manager.
+func (m *Manager) UnregisterOnlineMap(name string) error {
+	m.access.Lock()
+	defer m.access.Unlock()
+
+	if _, found := m.onlineMap[name]; found {
+		errors.LogDebug(context.Background(), "remove onlineMap ", name)
+		delete(m.onlineMap, name)
+	}
+	return nil
+}
+
+// GetOnlineMap implements stats.Manager.
+func (m *Manager) GetOnlineMap(name string) stats.OnlineMap {
+	m.access.RLock()
+	defer m.access.RUnlock()
+
+	if om, found := m.onlineMap[name]; found {
+		return om
+	}
+	return nil
+}
+
 // RegisterChannel implements stats.Manager.
 func (m *Manager) RegisterChannel(name string) (stats.Channel, error) {
 	m.access.Lock()
 	defer m.access.Unlock()
 
 	if _, found := m.channels[name]; found {
-		return nil, newError("Channel ", name, " already registered.")
+		return nil, errors.New("Channel ", name, " already registered.")
 	}
-	newError("create new channel ", name).AtDebug().WriteToLog()
+	errors.LogDebug(context.Background(), "create new channel ", name)
 	c := NewChannel(&ChannelConfig{BufferSize: 64, Blocking: false})
 	m.channels[name] = c
 	if m.running {
@@ -130,7 +167,7 @@ func (m *Manager) UnregisterChannel(name string) error {
 	defer m.access.Unlock()
 
 	if c, found := m.channels[name]; found {
-		newError("remove channel ", name).AtDebug().WriteToLog()
+		errors.LogDebug(context.Background(), "remove channel ", name)
 		delete(m.channels, name)
 		return c.Close()
 	}
@@ -172,7 +209,7 @@ func (m *Manager) Close() error {
 	m.running = false
 	errs := []error{}
 	for name, channel := range m.channels {
-		newError("remove channel ", name).AtDebug().WriteToLog()
+		errors.LogDebug(context.Background(), "remove channel ", name)
 		delete(m.channels, name)
 		if err := channel.Close(); err != nil {
 			errs = append(errs, err)

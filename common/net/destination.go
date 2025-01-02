@@ -7,9 +7,9 @@ import (
 
 // Destination represents a network destination including address and protocol (tcp / udp).
 type Destination struct {
-	Address    Address
-	Port       Port
-	Network    Network
+	Address Address
+	Port    Port
+	Network Network
 	Sni        string
 	UdpSpeeder uint32
 }
@@ -62,16 +62,6 @@ func ParseDestination(dest string) (Destination, error) {
 	return d, nil
 }
 
-func TCPDestinationExt(address Address, port Port, sni string, udpSpeeder uint32) Destination {
-	return Destination{
-		Network:    Network_TCP,
-		Address:    address,
-		Port:       port,
-		Sni:        sni,
-		UdpSpeeder: udpSpeeder,
-	}
-}
-
 // TCPDestination creates a TCP destination with given address
 func TCPDestination(address Address, port Port) Destination {
 	return Destination{
@@ -101,10 +91,12 @@ func UnixDestination(address Address) Destination {
 // NetAddr returns the network address in this Destination in string form.
 func (d Destination) NetAddr() string {
 	addr := ""
-	if d.Network == Network_TCP || d.Network == Network_UDP {
-		addr = d.Address.String() + ":" + d.Port.String()
-	} else if d.Network == Network_UNIX {
-		addr = d.Address.String()
+	if d.Address != nil {
+		if d.Network == Network_TCP || d.Network == Network_UDP {
+			addr = d.Address.String() + ":" + d.Port.String()
+		} else if d.Network == Network_UNIX {
+			addr = d.Address.String()
+		}
 	}
 	return addr
 }

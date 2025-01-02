@@ -12,16 +12,15 @@ import (
 	"github.com/xtls/xray-core/common/net"
 )
 
-//go:generate go run github.com/xtls/xray-core/common/errors/errorgen
-
 type Interface interface {
 	net.Conn
 	HandshakeContext(ctx context.Context) error
 	VerifyHostname(host string) error
-	NegotiatedProtocol() (name string, mutual bool)
+	NegotiatedProtocol() string
 }
 
 var _ buf.Writer = (*Conn)(nil)
+var _ Interface = (*Conn)(nil)
 
 type Conn struct {
 	*tls.Conn
@@ -55,9 +54,9 @@ func (c *Conn) HandshakeAddressContext(ctx context.Context) net.Address {
 	return net.ParseAddress(state.ServerName)
 }
 
-func (c *Conn) NegotiatedProtocol() (name string, mutual bool) {
+func (c *Conn) NegotiatedProtocol() string {
 	state := c.ConnectionState()
-	return state.NegotiatedProtocol, state.NegotiatedProtocolIsMutual
+	return state.NegotiatedProtocol
 }
 
 // Client initiates a TLS client handshake on the given connection.
@@ -75,6 +74,8 @@ func Server(c net.Conn, config *tls.Config) net.Conn {
 type UConn struct {
 	*utls.UConn
 }
+
+var _ Interface = (*UConn)(nil)
 
 func (c *UConn) Close() error {
 	timer := time.AfterFunc(tlsCloseTimeout, func() {
@@ -122,9 +123,9 @@ func (c *UConn) WebsocketHandshakeContext(ctx context.Context) error {
 	return c.HandshakeContext(ctx)
 }
 
-func (c *UConn) NegotiatedProtocol() (name string, mutual bool) {
+func (c *UConn) NegotiatedProtocol() string {
 	state := c.ConnectionState()
-	return state.NegotiatedProtocol, state.NegotiatedProtocolIsMutual
+	return state.NegotiatedProtocol
 }
 
 func UClient(c net.Conn, config *tls.Config, fingerprint *utls.ClientHelloID) net.Conn {
@@ -164,7 +165,7 @@ func init() {
 
 func GetFingerprint(name string) (fingerprint *utls.ClientHelloID) {
 	if name == "" {
-		return
+		return &utls.HelloChrome_Auto
 	}
 	if fingerprint = PresetFingerprints[name]; fingerprint != nil {
 		return
@@ -190,6 +191,7 @@ var PresetFingerprints = map[string]*utls.ClientHelloID{
 	"qq":         &utls.HelloQQ_Auto,
 	"random":     nil,
 	"randomized": nil,
+	"unsafe":     nil,
 }
 
 var ModernFingerprints = map[string]*utls.ClientHelloID{
